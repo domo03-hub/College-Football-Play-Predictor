@@ -72,6 +72,7 @@ importances = pd.DataFrame({
     "Importance": ci_model.feature_importances_
 }).sort_values("Importance", ascending=False)
 print("\nFeature Importances:\n", importances)
-joblib.dump(ci_model, "run_pass_ci_forest.pkl")
-joblib.dump(label_encoders, "encoders_ci_forest.pkl")
+joblib.dump(ci_model, "run_pass_ctree.pkl")
+joblib.dump(label_encoders, "encoders_ctree.pkl")
 print("\n✅ Saved Conditional Inference Forest model to 'run_pass_ci_forest.pkl'")
+
