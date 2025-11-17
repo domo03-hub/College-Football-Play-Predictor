@@ -93,5 +93,5 @@ print("\nFeature Importances:\n", importances)
 
 # === 9. Save model ===
 joblib.dump(rf, "run_pass_rf.pkl")
-joblib.dump(label_encoders, "encoders.pkl")
+joblib.dump(label_encoders, "encoders_rf.pkl")
 print("\n✅ Model saved to 'run_pass_rf.pkl'")
