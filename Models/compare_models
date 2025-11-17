@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import joblib
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score, log_loss, brier_score_loss
+from sklearn.metrics import accuracy_score, log_loss, brier_score_loss, classification_report, confusion_matrix
 from pathlib import Path
 from tabulate import tabulate
 
@@ -122,21 +122,44 @@ def evaluate_single(name, prefix, X, y, df):
         print(f"Prediction error for {name}: {e}\n")
         return None
 
+    # Confusion matrix & classification report
+    cm = confusion_matrix(y, y_pred, labels=["Pass", "Run"])
+    report = classification_report(y, y_pred, output_dict=True, labels=["Pass", "Run"])
+
     results = {
         "accuracy": round(accuracy_score(y, y_pred), 3),
-        "situational": situational_accuracy(df, y, y_pred)
+        "f1_macro": round(report["macro avg"]["f1-score"], 3),
+        "run_bias": round(cm[1].sum() / cm.sum(), 3),  # % predicted Run
+        "situational": situational_accuracy(df, y, y_pred),
+        "confusion_matrix": cm,
+        "classification_report": report
     }
 
     if y_pred_prob is not None:
         results["cross_entropy"] = round(log_loss(y.map({"Run":0,"Pass":1}), y_pred_prob), 3)
         results["brier_score"] = round(brier_score_loss(y.map({"Run":0,"Pass":1}), y_pred_prob), 3)
+
+    # Feature importance (tree-based or logistic regression)
+    if hasattr(model, "feature_importances_"):
+        importances = pd.Series(model.feature_importances_, index=X_eval.columns)
+        results["top_feature"] = importances.idxmax()
+    elif hasattr(model, "coef_"):
+        coef = pd.Series(model.coef_[0], index=X_eval.columns)
+        results["top_feature"] = coef.abs().idxmax()
+    else:
+        results["top_feature"] = None
+
     return results
 
 def print_evaluation(name, res):
-    rows = [["Accuracy", res["accuracy"]]]
+    rows = [["Accuracy", res["accuracy"]],
+            ["F1 (macro)", res["f1_macro"]],
+            ["Run Bias", res["run_bias"]]]
     if "cross_entropy" in res:
         rows.append(["Cross-Entropy", res["cross_entropy"]])
         rows.append(["Brier Score", res["brier_score"]])
+    if res["top_feature"]:
+        rows.append(["Top Feature", res["top_feature"]])
 
     print(f"\nEvaluation Results for {name}")
     print(tabulate(rows, headers=["Metric", "Value"], tablefmt="github"))
@@ -146,14 +169,47 @@ def print_evaluation(name, res):
         print(f"\nBy {key}:")
         print(tabulate(val.items(), headers=[key, "Accuracy"], tablefmt="github"))
 
-def print_leaderboard(leaderboard):
+def print_leaderboard(models_results):
     print("\nModel Leaderboard")
-    leaderboard.sort(key=lambda x: x[1], reverse=True)
+    rows = []
+    for name, res in models_results.items():
+        rows.append([
+            name,
+            res["accuracy"],
+            res["f1_macro"],
+            res["run_bias"],
+            res["top_feature"] if res["top_feature"] else "-"
+        ])
+    rows.sort(key=lambda x: x[1], reverse=True)
     print(tabulate(
-        [(i+1, name, acc) for i, (name, acc) in enumerate(leaderboard)],
-        headers=["Rank", "Model", "Accuracy"],
+        [(i+1, *row) for i, row in enumerate(rows)],
+        headers=["Rank", "Model", "Accuracy", "F1 (macro)", "Run Bias", "Top Feature"],
         tablefmt="github"
     ))
+
+def collect_situational_results(models_results):
+    situational_leaderboards = {}
+    for model_name, res in models_results.items():
+        for category, values in res["situational"].items():
+            if category not in situational_leaderboards:
+                situational_leaderboards[category] = {}
+            for bucket, acc in values.items():
+                situational_leaderboards[category].setdefault(bucket, [])
+                situational_leaderboards[category][bucket].append((model_name, acc))
+    return situational_leaderboards
+
+def print_situational_leaderboards(situational_leaderboards):
+    print("\nSituational Leaderboards")
+    for category, buckets in situational_leaderboards.items():
+        print(f"\n=== {category.upper()} ===")
+        for bucket, results in buckets.items():
+            results.sort(key=lambda x: x[1], reverse=True)
+            print(f"\n{bucket}:")
+            print(tabulate(
+                [(i+1, name, acc) for i, (name, acc) in enumerate(results)],
+                headers=["Rank", "Model", "Accuracy"],
+                tablefmt="github"
+            ))
 
 def main():
     df = load_data()
@@ -176,20 +232,23 @@ def main():
         ("Conditional Inference", "ctree")
     ]
 
-    leaderboard = []
+    models_results = {}
 
     for name, prefix in models:
         print(f"\nEvaluating model: {name} (prefix='{prefix}')")
         res = evaluate_single(name, prefix, X, y, df)
         if res is None:
             continue
-        leaderboard.append((name, res["accuracy"]))
+        models_results[name] = res
         print_evaluation(name, res)
 
-    if leaderboard:
-        print_leaderboard(leaderboard)
+    if models_results:
+        print_leaderboard(models_results)
+        situational_leaderboards = collect_situational_results(models_results)
+        print_situational_leaderboards(situational_leaderboards)
     else:
         print("No models evaluated successfully.")
+
 
 if __name__ == "__main__":
     main()
