@@ -98,9 +98,12 @@ def situational_accuracy(df, y_true, y_pred):
     }
     return results
 
+
+
 def evaluate_single(name, prefix, X, y, df):
     model_file = f"run_pass_{prefix}.pkl"
     encoder_file = f"encoders_{prefix}.pkl"
+    scaler_file = f"scaler_{prefix}.pkl"  # NEW: look for scaler
 
     if not Path(model_file).exists() or not Path(encoder_file).exists():
         print(f"Skipping {name} ({prefix}) — Missing model or encoder for prefix '{prefix}'\n")
@@ -108,12 +111,18 @@ def evaluate_single(name, prefix, X, y, df):
 
     model = joblib.load(model_file)
     encoders = joblib.load(encoder_file)
+    scaler = joblib.load(scaler_file) if Path(scaler_file).exists() else None
 
     X_eval = X.copy()
     cat_cols = encoders.keys()
     for col in cat_cols:
         if col in X_eval.columns:
             X_eval[col] = safe_transform(encoders[col], X_eval[col])
+
+    # Apply scaler if present
+    if scaler is not None:
+        # Keep DataFrame structure so feature names are preserved
+        X_eval = pd.DataFrame(scaler.transform(X_eval), columns=X_eval.columns)
 
     try:
         y_pred = model.predict(X_eval)
@@ -150,6 +159,8 @@ def evaluate_single(name, prefix, X, y, df):
         results["top_feature"] = None
 
     return results
+
+
 
 def print_evaluation(name, res):
     rows = [["Accuracy", res["accuracy"]],
